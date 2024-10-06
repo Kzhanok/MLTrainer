@@ -41,66 +41,51 @@ def get_device() -> str:
         logger.info("Using cpu")
     return device
 
-
+import torchvision.models as models
 # Define model
-class CNN(nn.Module):
-    def __init__(self, filters: int, units1: int, units2: int, input_size= (32,3,224,224)):
+class CNNWithResNet(nn.Module):
+    def __init__(self, units1: int, units2: int, filters=64):
         super().__init__()
-        self.in_channels = input_size[1]
-        self.input_size = input_size
-        logger.info(f'Testing params: {filters}, {units1}, {units2}')
-        self.convolutions = nn.Sequential(
-            nn.Conv2d(self.in_channels, filters, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(filters),
-            nn.ReLU(),
-            nn.Conv2d(filters, filters, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(filters),
-            nn.ReLU(),
-            nn.Conv2d(filters, filters, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(filters),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2),  # Output size halved
-            nn.Conv2d(filters, filters*2, kernel_size=3, stride=2, padding=0),
-            nn.BatchNorm2d(filters*2),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2),  # Output size halved again
-            nn.Conv2d(filters*2, filters*3, kernel_size=3, stride=2, padding=0),
-            nn.BatchNorm2d(filters*3),
-            nn.ReLU(),
-            nn.Dropout(p=0.2),
-            nn.MaxPool2d(kernel_size=2),
-            # Output size halved once more
-        )
-
-        # Calculate the flattened size based on actual output shape after convolutions
-        flattened_size = self._get_flattened_size(input_size)
-        logger.info(f"Flattened size for the first Linear layer: {flattened_size}")
-
-        # Remove AdaptiveAvgPool2d, as the tensor is already reduced
-        self.dense = nn.Sequential(
-            nn.Flatten(),  # Flatten the 2D to 1D
-            nn.Linear(flattened_size, units1),  # Input size should match the flattened size
-            nn.BatchNorm1d(units1),
-            nn.ReLU(),
-            nn.Linear(units1, units2),
-            nn.BatchNorm1d(units2),
-            nn.ReLU(),
-            nn.Dropout(p=0.2),
-            nn.Linear(units2, 5)  # Output 10 classes
-        )
         
-    # This function calculates the flattened size after convolutions
-    def _get_flattened_size(self, input_size):
-        x = torch.ones(1, *input_size[1:], dtype=torch.float32)  # Add batch dimension
-        x = self.convolutions(x)
-        logger.info(f"Output shape after convolutions: {x.shape}")
-        return x.numel()  # Return the total number of elements (flattened size)
+        # Load a pre-trained ResNet model
+        self.resnext = models.resnext50_32x4d(pretrained=True)
+        
+        # Optionally freeze the ResNet layers if you don't want to fine-tune them
+        for param in self.resnext.parameters():
+            param.requires_grad = False
+        
+        # Replace the final fully connected layer of ResNet with an identity layer,
+        # So that we can add our custom dense block after the feature extraction
+        num_features = self.resnext.fc.in_features
+        self.resnext.fc = nn.Identity()  # We will handle the fully connected part later
+        
+        # Now, define your dense layers (similar to the dense block in your CNN)
+        self.dense = nn.Sequential(
+            nn.Linear(num_features, units1),  # First fully connected layer
+            nn.BatchNorm1d(units1),            # Batch normalization
+            nn.ReLU(),                         # Activation function
+            
+            nn.Linear(units1, units2),          # Second fully connected layer
+            nn.BatchNorm1d(units2),            # Batch normalization
+            nn.ReLU(),
+            nn.Dropout(p=0.4),                 # Dropout for regularization
+            
+            nn.Linear(units2, 64),             # Optional layer to further reduce dimensions
+            nn.ReLU(),
+            nn.Dropout(p=0.4),                 # More dropout if overfitting is an issue
+            
+            nn.Linear(64, 5)                   # Final layer with 5 output classes
+        )
+
 
     def forward(self, x):
-        x = self.convolutions(x)
-        x = self.dense(x)  # Forward to dense layers
+        # Extract features using the ResNet convolutional layers
+        x = self.resnext(x)
+        
+        # Pass the extracted features through the custom dense layers
+        x = self.dense(x)
         return x
-
+    
 def setup_mlflow(experiment_path: str) -> None:
     mlflow.set_tracking_uri("sqlite:///mlflow.db")
     mlflow.set_experiment(experiment_path)
@@ -112,7 +97,7 @@ def objective(params: dict = None, filters: int = None, units1: int = None, unit
     if not modeldir.exists():
         modeldir.mkdir(parents=True)
         logger.info(f"Created {modeldir}")
-    batchsize = 32
+    batchsize = 16
     trainstreamer, validstreamer, len_train, len_valid = get_fashion_streamers(batchsize)
     accuracy = metrics.Accuracy()
     settings = TrainerSettings(
@@ -136,11 +121,11 @@ def objective(params: dict = None, filters: int = None, units1: int = None, unit
             mlflow.log_param("batchsize", f"{batchsize}")
 
             # Initialize the optimizer, loss function, and accuracy metric
-            optimizer = optim.Adam
+            optimizer = optim.AdamW
             loss_fn = torch.nn.CrossEntropyLoss()
 
             # Instantiate the CNN model with the given hyperparameters
-            model = CNN(filters, units1, units2)
+            model = CNNWithResNet(filters, units1, units2)
             model.to(device)
             # Train the model using a custom train loop
             trainer = Trainer(
@@ -175,11 +160,11 @@ def objective(params: dict = None, filters: int = None, units1: int = None, unit
             mlflow.log_param("batchsize", f"{batchsize}")
 
             # Initialize the optimizer, loss function, and accuracy metric
-            optimizer = optim.Adam
+            optimizer = optim.AdamW
             loss_fn = torch.nn.CrossEntropyLoss()
 
             # Instantiate the CNN model with the given hyperparameters
-            model = CNN(filters, units1, units2)
+            model = CNNWithResNet(filters, units1, units2)
             model.to(device)
             # Train the model using a custom train loop
             trainer = Trainer(

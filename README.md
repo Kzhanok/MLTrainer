@@ -19,4 +19,4 @@ Building Guide:
 Current State:
 
 Model is defined!
-Next Trainer needs to be built
+Next Trainer needs to be built -> MLFLOW experiment names need to be dynamic

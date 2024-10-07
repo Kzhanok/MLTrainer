@@ -43,23 +43,36 @@ def get_device() -> str:
 
 import torchvision.models as models
 # Define model
-class CNNWithResNet(nn.Module):
-    def __init__(self, units1: int, units2: int, filters=64):
+class CNN(nn.Module):
+    def __init__(self, filters: int, units1: int, units2: int, input_size= (16,3,224,224)):
         super().__init__()
-        
-        # Load a pre-trained ResNet model
-        self.resnext = models.resnext50_32x4d(pretrained=True)
-        
-        # Optionally freeze the ResNet layers if you don't want to fine-tune them
-        for param in self.resnext.parameters():
-            param.requires_grad = False
-        
-        # Replace the final fully connected layer of ResNet with an identity layer,
-        # So that we can add our custom dense block after the feature extraction
-        num_features = self.resnext.fc.in_features
-        self.resnext.fc = nn.Identity()  # We will handle the fully connected part later
-        
-        # Now, define your dense layers (similar to the dense block in your CNN)
+        self.in_channels = input_size[1]
+        logger.info(self.in_channels)
+        self.input_size = input_size
+        logger.info(self.input_size)
+
+        self.convolutions = nn.Sequential(
+            nn.Conv2d(self.in_channels, filters, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(filters),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),  # Output size halved
+            nn.Conv2d(filters, filters*2, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(filters*2),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),  # Output size halved again
+            nn.Conv2d(filters*2, filters*3, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(filters*3),
+            nn.ReLU(),
+            nn.Dropout(p=0.2),
+            nn.MaxPool2d(kernel_size=2),
+            # Output size halved once more
+        )
+
+        # Calculate the flattened size based on actual output shape after convolutions
+        flattened_size = self._get_flattened_size(input_size)
+        logger.info(f"Flattened size for the first Linear layer: {flattened_size}")
+
+        # Remove AdaptiveAvgPool2d, as the tensor is already reduced
         self.dense = nn.Sequential(
             nn.Linear(num_features, units1),  # First fully connected layer
             nn.BatchNorm1d(units1),            # Batch normalization
@@ -68,15 +81,23 @@ class CNNWithResNet(nn.Module):
             nn.Linear(units1, units2),          # Second fully connected layer
             nn.BatchNorm1d(units2),            # Batch normalization
             nn.ReLU(),
-            nn.Dropout(p=0.4),                 # Dropout for regularization
-            
-            nn.Linear(units2, 64),             # Optional layer to further reduce dimensions
+            nn.Linear(units1, units2),
+            nn.BatchNorm1d(units2),
             nn.ReLU(),
-            nn.Dropout(p=0.4),                 # More dropout if overfitting is an issue
-            
-            nn.Linear(64, 5)                   # Final layer with 5 output classes
+            nn.Dropout(p=0.2),
+            nn.Linear(units2, units2),
+            nn.BatchNorm1d(units2),
+            nn.ReLU(),
+            nn.Dropout(p=0.2),
+            nn.Linear(units2, 5)  # Output 10 classes
         )
 
+    # This function calculates the flattened size after convolutions
+    def _get_flattened_size(self, input_size):
+        x = torch.ones(1, *input_size[1:], dtype=torch.float32)  # Add batch dimension
+        x = self.convolutions(x)
+        logger.info(f"Output shape after convolutions: {x.shape}")
+        return x.numel()  # Return the total number of elements (flattened size)
 
     def forward(self, x):
         # Extract features using the ResNet convolutional layers
@@ -97,7 +118,7 @@ def objective(params: dict = None, filters: int = None, units1: int = None, unit
     if not modeldir.exists():
         modeldir.mkdir(parents=True)
         logger.info(f"Created {modeldir}")
-    batchsize = 16
+    batchsize = 32
     trainstreamer, validstreamer, len_train, len_valid = get_fashion_streamers(batchsize)
     accuracy = metrics.Accuracy()
     settings = TrainerSettings(
@@ -110,15 +131,14 @@ def objective(params: dict = None, filters: int = None, units1: int = None, unit
     )
     # Start a new MLflow run for tracking the experiment
     device = get_device()
-    if params is not None:
-        with mlflow.start_run():
-            # Set MLflow tags to record metadata about the model and developer
-            mlflow.set_tag("model", "convnet")
-            mlflow.set_tag("dev", "raoul")
-            mlflow.set_tag('mlflow.runName', f'{datetime.now().strftime("%Y%m%d-%H%M")}')
-            # Log hyperparameters to MLflow
-            mlflow.log_params(params)
-            mlflow.log_param("batchsize", f"{batchsize}")
+    with mlflow.start_run():
+        # Set MLflow tags to record metadata about the model and developer
+        mlflow.set_tag("model", "convnet")
+        mlflow.set_tag("Leon", "Smit")
+        mlflow.set_tag('mlflow.runName', f'{datetime.now().strftime("%Y%m%d-%H%M")}')
+        # Log hyperparameters to MLflow
+        mlflow.log_params(params)
+        mlflow.log_param("batchsize", f"{batchsize}")
 
             # Initialize the optimizer, loss function, and accuracy metric
             optimizer = optim.AdamW
@@ -194,9 +214,9 @@ def main():
     setup_mlflow(f"model run {datetime.now().strftime('%Y%m%d-%H%M')}")
     
     search_space = {
-        "filters": scope.int(hp.quniform("filters", 64, 128, 8)),
-        "units1": scope.int(hp.quniform("units1", 256, 512, 8)),
-        "units2": scope.int(hp.quniform("units2", 32, 128, 8)),
+        "filters": scope.int(hp.quniform("filters", 64, 256, 8)),
+        "units1": scope.int(hp.quniform("units1",256 , 512, 8)),
+        "units2": scope.int(hp.quniform("units2", 128, 256, 8)),
     }
     objective(filters=64, units1=256, units2=128)
     #best_result = fmin(

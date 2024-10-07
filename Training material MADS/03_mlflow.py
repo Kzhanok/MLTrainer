@@ -15,16 +15,18 @@ from mltrainer.preprocessors import BasePreprocessor
 
 
 def get_fashion_streamers(batchsize: int) -> tuple[Iterator, Iterator]:
-    fashionfactory = DatasetFactoryProvider.create_factory(DatasetType.FASHION)
+    fashionfactory = DatasetFactoryProvider.create_factory(DatasetType.FLOWERS)
     preprocessor = BasePreprocessor()
     streamers = fashionfactory.create_datastreamer(
         batchsize=batchsize, preprocessor=preprocessor
     )
     train = streamers["train"]
     valid = streamers["valid"]
+    len_train = len(train)
+    len_valid = len(valid)
     trainstreamer = train.stream()
     validstreamer = valid.stream()
-    return trainstreamer, validstreamer
+    return trainstreamer, validstreamer, len_train, len_valid
 
 
 def get_device() -> str:
@@ -42,23 +44,23 @@ def get_device() -> str:
 
 # Define model
 class CNN(nn.Module):
-    def __init__(self, filters: int, units1: int, units2: int, input_size= (32,1,28,28)):
+    def __init__(self, filters: int, units1: int, units2: int, input_size= (16,3,224,224)):
         super().__init__()
         self.in_channels = input_size[1]
+        logger.info(self.in_channels)
         self.input_size = input_size
+        logger.info(self.input_size)
 
         self.convolutions = nn.Sequential(
-            nn.Conv2d(self.in_channels, filters, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(self.in_channels, filters, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(filters),
             nn.ReLU(),
-            nn.Dropout(p=0.2),
             nn.MaxPool2d(kernel_size=2),  # Output size halved
-            nn.Conv2d(filters, filters*2, kernel_size=3, stride=1, padding=0),
+            nn.Conv2d(filters, filters*2, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(filters*2),
             nn.ReLU(),
-            nn.Dropout(p=0.2),
             nn.MaxPool2d(kernel_size=2),  # Output size halved again
-            nn.Conv2d(filters*2, filters*3, kernel_size=3, stride=1, padding=0),
+            nn.Conv2d(filters*2, filters*3, kernel_size=3, stride=2, padding=1),
             nn.BatchNorm2d(filters*3),
             nn.ReLU(),
             nn.Dropout(p=0.2),
@@ -76,7 +78,6 @@ class CNN(nn.Module):
             nn.Linear(flattened_size, units1),  # Input size should match the flattened size
             nn.BatchNorm1d(units1),
             nn.ReLU(),
-            nn.Dropout(p=0.2),
             nn.Linear(units1, units2),
             nn.BatchNorm1d(units2),
             nn.ReLU(),
@@ -85,7 +86,7 @@ class CNN(nn.Module):
             nn.BatchNorm1d(units2),
             nn.ReLU(),
             nn.Dropout(p=0.2),
-            nn.Linear(units2, 10)  # Output 10 classes
+            nn.Linear(units2, 5)  # Output 10 classes
         )
 
     # This function calculates the flattened size after convolutions
@@ -111,15 +112,15 @@ def objective(params):
     if not modeldir.exists():
         modeldir.mkdir(parents=True)
         logger.info(f"Created {modeldir}")
-    batchsize = 64
-    trainstreamer, validstreamer = get_fashion_streamers(batchsize)
+    batchsize = 32
+    trainstreamer, validstreamer, len_train, len_valid = get_fashion_streamers(batchsize)
     accuracy = metrics.Accuracy()
     settings = TrainerSettings(
         epochs=7,
         metrics=[accuracy],
         logdir=Path("modellog"),
-        train_steps=937,
-        valid_steps=156,
+        train_steps=len_train,
+        valid_steps=len_valid,
         reporttypes=[ReportTypes.MLFLOW],
     )
     # Start a new MLflow run for tracking the experiment
@@ -127,8 +128,8 @@ def objective(params):
     with mlflow.start_run():
         # Set MLflow tags to record metadata about the model and developer
         mlflow.set_tag("model", "convnet")
-        mlflow.set_tag("dev", "raoul")
-        mlflow.set_tag('mlflow.runName', 'fashion_mnist')
+        mlflow.set_tag("Leon", "Smit")
+        mlflow.set_tag('mlflow.runName', f'{datetime.now().strftime("%Y%m%d-%H%M")}')
         # Log hyperparameters to MLflow
         mlflow.log_params(params)
         mlflow.log_param("batchsize", f"{batchsize}")
@@ -169,8 +170,8 @@ def main():
 
     search_space = {
         "filters": scope.int(hp.quniform("filters", 64, 256, 8)),
-        "units1": scope.int(hp.quniform("units1", 64, 512, 8)),
-        "units2": scope.int(hp.quniform("units2", 32, 128, 8)),
+        "units1": scope.int(hp.quniform("units1",256 , 512, 8)),
+        "units2": scope.int(hp.quniform("units2", 128, 256, 8)),
     }
 
     best_result = fmin(

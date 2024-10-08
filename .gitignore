@@ -167,3 +167,5 @@ cython_debug/
 */mlruns
 */modellog
 */models
+*.jpg
+LICENSE.txt

@@ -9,14 +9,32 @@ from mltrainer import ReportTypes, Trainer, TrainerSettings, metrics, rnn_models
 from mltrainer.preprocessors import PaddedPreprocessor
 from ray import tune
 from ray.tune import CLIReporter
+from ray.air.integrations.mlflow import MLflowLoggerCallback  # Import MLflowLoggerCallback
 from ray.tune.search.hyperopt import HyperOptSearch
 from ray.tune.schedulers import AsyncHyperBandScheduler
 
 SAMPLE_INT = tune.search.sample.Integer
 SAMPLE_FLOAT = tune.search.sample.Float
-NUM_SAMPLES = 10
+NUM_SAMPLES = 2
 MAX_EPOCHS = 50
+import torch.nn as nn
+import torch.hub
+class CustomResNextModel(nn.Module):
+    def __init__(self, config: Dict) -> None:
+        super().__init__()
+        self.resnext = torch.hub.load('pytorch/vision:v0.10.0', 'resnet50', pretrained=True)
+        for param in self.resnext.parameters():
+            param.requires_grad = False  # Freeze the ResNeXt layers
+        num_ftrs = self.resnext.fc.in_features
+        # Replace the final fully connected layer
+        self.resnext.fc = nn.Identity()  # Remove the original fully connected layer
+        self.fc1 = nn.Linear(num_ftrs, config["output_size"])
 
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.resnext(x)
+        x = self.fc1(x)
+        return x
 
 def train(config: Dict):
     """
@@ -27,42 +45,43 @@ def train(config: Dict):
     from mads_datasets import DatasetFactoryProvider, DatasetType
 
     data_dir = config["data_dir"]
-    gesturesdatasetfactory = DatasetFactoryProvider.create_factory(DatasetType.GESTURES)
+    gesturesdatasetfactory = DatasetFactoryProvider.create_factory(DatasetType.FLOWERS)
     preprocessor = PaddedPreprocessor()
 
     with FileLock(data_dir / ".lock"):
-        # we lock the datadir to avoid parallel instances trying to
-        # access the datadir
+        # We lock the datadir to avoid parallel instances trying to access it
         streamers = gesturesdatasetfactory.create_datastreamer(
             batchsize=32, preprocessor=preprocessor
         )
-        train = streamers["train"]
-        valid = streamers["valid"]
+        train_streamer = streamers["train"]
+        valid_streamer = streamers["valid"]
 
-    # we set up the metric
-    # and create the model with the config
+    # Set up the metric and create the model with the config
     accuracy = metrics.Accuracy()
-    model = rnn_models.GRUmodel(config)
+    
+    
+    import torch.nn as nn
+    import torch.hub
+
+    
+
+    model = CustomResNextModel(config)
+    
+    
+    #model = rnn_models.GRUmodel(config)
 
     trainersettings = TrainerSettings(
         epochs=MAX_EPOCHS,
         metrics=[accuracy],
         logdir=Path("."),
-        train_steps=len(train),  # type: ignore
-        valid_steps=len(valid),  # type: ignore
-        reporttypes=[ReportTypes.RAY],
+        train_steps=len(train_streamer),  # type: ignore
+        valid_steps=len(valid_streamer),  # type: ignore
+        reporttypes=[ReportTypes.RAY],  # Reporting to Ray Tune
         scheduler_kwargs={"factor": 0.5, "patience": 5},
         earlystop_kwargs=None,
     )
 
-    # because we set reporttypes=[ReportTypes.RAY]
-    # the trainloop wont try to report back to tensorboard,
-    # but will report back with ray
-    # this way, ray will know whats going on,
-    # and can start/pause/stop a loop.
-    # This is why we set earlystop_kwargs=None, because we
-    # are handing over this control to ray.
-
+    # Determine the device to use
     if torch.backends.mps.is_available() and torch.backends.mps.is_built():
         device = torch.device("mps")
     else:
@@ -70,7 +89,7 @@ def train(config: Dict):
     logger.info(f"Using {device}")
     if device != "cpu":
         logger.warning(
-            f"using acceleration with {device}." "Check if it actually speeds up!"
+            f"Using acceleration with {device}. Check if it actually speeds up!"
         )
 
     trainer = Trainer(
@@ -78,13 +97,13 @@ def train(config: Dict):
         settings=trainersettings,
         loss_fn=torch.nn.CrossEntropyLoss(),
         optimizer=torch.optim.Adam,  # type: ignore
-        traindataloader=train.stream(),
-        validdataloader=valid.stream(),
+        traindataloader=train_streamer.stream(),
+        validdataloader=valid_streamer.stream(),
         scheduler=torch.optim.lr_scheduler.ReduceLROnPlateau,
         device=device,
     )
 
-    trainer.loop()
+    trainer.loop()  # Start the training loop
 
 
 if __name__ == "__main__":
@@ -105,12 +124,11 @@ if __name__ == "__main__":
 
     config = {
         "input_size": 3,
-        "output_size": 20,
+        "output_size": 5,
         "tune_dir": tune_dir,
         "data_dir": data_dir,
-        "hidden_size": tune.randint(16, 128),
-        "dropout": tune.uniform(0.0, 0.3),
-        "num_layers": tune.randint(2, 20),
+        "test_number": tune.randint(1, 100),
+        
     }
 
     reporter = CLIReporter()
@@ -127,6 +145,12 @@ if __name__ == "__main__":
         search_alg=search,
         scheduler=scheduler,
         verbose=1,
+        callbacks=[
+            MLflowLoggerCallback(
+                tracking_uri="mlruns",  # Set your MLflow tracking URI
+                experiment_name="my_experiment",  # Set your experiment name
+            )
+        ],
     )
 
     ray.shutdown()

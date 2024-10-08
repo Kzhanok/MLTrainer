@@ -42,7 +42,7 @@ def get_device() -> str:
     return device
 
 import torchvision.models as models
-# Define model
+# Define model, #TODO change to resnext
 class CNN(nn.Module):
     def __init__(self, filters: int, units1: int, units2: int, input_size= (16,3,224,224)):
         super().__init__()
@@ -74,7 +74,7 @@ class CNN(nn.Module):
 
         # Remove AdaptiveAvgPool2d, as the tensor is already reduced
         self.dense = nn.Sequential(
-            nn.Linear(num_features, units1),  # First fully connected layer
+            nn.Linear(flattened_size, units1),  # First fully connected layer
             nn.BatchNorm1d(units1),            # Batch normalization
             nn.ReLU(),                         # Activation function
             
@@ -140,74 +140,36 @@ def objective(params: dict = None, filters: int = None, units1: int = None, unit
         mlflow.log_params(params)
         mlflow.log_param("batchsize", f"{batchsize}")
 
-            # Initialize the optimizer, loss function, and accuracy metric
-            optimizer = optim.AdamW
-            loss_fn = torch.nn.CrossEntropyLoss()
+        # Initialize the optimizer, loss function, and accuracy metric
+        optimizer = optim.AdamW
+        loss_fn = torch.nn.CrossEntropyLoss()
 
-            # Instantiate the CNN model with the given hyperparameters
-            model = CNNWithResNet(filters, units1, units2)
-            model.to(device)
-            # Train the model using a custom train loop
-            trainer = Trainer(
-                model=model,
-                settings=settings,
-                loss_fn=loss_fn,
-                optimizer=optimizer,  # type: ignore
-                traindataloader=trainstreamer,
-                validdataloader=validstreamer,
-                scheduler=optim.lr_scheduler.ReduceLROnPlateau,
-                device=device,
-            )
-            trainer.loop()
+        # Instantiate the CNN model with the given hyperparameters
+        model = CNN(filters, units1, units2)
+        model.to(device)
+        # Train the model using a custom train loop
+        trainer = Trainer(
+            model=model,
+            settings=settings,
+            loss_fn=loss_fn,
+            optimizer=optimizer,  # type: ignore
+            traindataloader=trainstreamer,
+            validdataloader=validstreamer,
+            scheduler=optim.lr_scheduler.ReduceLROnPlateau,
+            device=device,
+        )
+        trainer.loop()
 
-            # Save the trained model with a timestamp
-            tag = datetime.now().strftime("%Y%m%d-%H%M")
-            modelpath = modeldir / (tag + "model.pt")
-            logger.info(f"Saving model to {modelpath}")
-            torch.save(model, modelpath)
+        # Save the trained model with a timestamp
+        tag = datetime.now().strftime("%Y%m%d-%H%M")
+        modelpath = modeldir / (tag + "model.pt")
+        logger.info(f"Saving model to {modelpath}")
+        torch.save(model, modelpath)
 
-            # Log the saved model as an artifact in MLflow
-            mlflow.log_artifact(local_path=str(modelpath), artifact_path="pytorch_models")
-            return {"loss": trainer.test_loss, "status": STATUS_OK}
-    else:
-        with mlflow.start_run():
-            # Set MLflow tags to record metadata about the model and developer
-            mlflow.set_tag("model", "convnet")
-            mlflow.set_tag("dev", "raoul")
-            mlflow.set_tag('mlflow.runName', f'{datetime.now().strftime("%Y%m%d-%H%M")}')
-            # Log hyperparameters to MLflow
-            #mlflow.log_params(params)
-            mlflow.log_param("batchsize", f"{batchsize}")
-
-            # Initialize the optimizer, loss function, and accuracy metric
-            optimizer = optim.AdamW
-            loss_fn = torch.nn.CrossEntropyLoss()
-
-            # Instantiate the CNN model with the given hyperparameters
-            model = CNNWithResNet(filters, units1, units2)
-            model.to(device)
-            # Train the model using a custom train loop
-            trainer = Trainer(
-                model=model,
-                settings=settings,
-                loss_fn=loss_fn,
-                optimizer=optimizer,  # type: ignore
-                traindataloader=trainstreamer,
-                validdataloader=validstreamer,
-                scheduler=optim.lr_scheduler.ReduceLROnPlateau,
-                device=device,
-            )
-            trainer.loop()
-
-            # Save the trained model with a timestamp
-            tag = datetime.now().strftime("%Y%m%d-%H%M")
-            modelpath = modeldir / (tag + "model.pt")
-            logger.info(f"Saving model to {modelpath}")
-            torch.save(model, modelpath)
-
-            # Log the saved model as an artifact in MLflow
-            mlflow.log_artifact(local_path=str(modelpath), artifact_path="pytorch_models")
-            return {"loss": trainer.test_loss, "status": STATUS_OK}
+        # Log the saved model as an artifact in MLflow
+        mlflow.log_artifact(local_path=str(modelpath), artifact_path="pytorch_models")
+        return {"loss": trainer.test_loss, "status": STATUS_OK}
+    
 
 from torchsummary import summary
 def main():
@@ -219,11 +181,11 @@ def main():
         "units2": scope.int(hp.quniform("units2", 128, 256, 8)),
     }
     objective(filters=64, units1=256, units2=128)
-    #best_result = fmin(
-    #    fn=objective, space=search_space, algo=tpe.suggest, max_evals=5, trials=Trials()
-    #)
+    best_result = fmin(
+        fn=objective, space=search_space, algo=tpe.suggest, max_evals=5, trials=Trials()
+    )
 
-    #logger.info(f"Best result: {best_result}")
+    logger.info(f"Best result: {best_result}")
     
 
 

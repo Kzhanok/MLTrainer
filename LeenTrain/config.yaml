@@ -1,0 +1,42 @@
+model:
+  input_size: [1, 28, 28]
+  layers:
+    - type: conv2d_max_block
+      params:
+        in_channels: 1
+        out_channels: 32
+        kernel_size: 3
+        stride: 1
+        padding: 1
+        batch_norm: True
+        max_pool: True
+        max_pool_kernel_size: 3
+    - type: conv2d_max_block
+      params:
+        in_channels: 32
+        out_channels: 32
+        kernel_size: 3
+        stride: 1
+        padding: 0
+        batch_norm: False
+        max_pool: True
+        max_pool_kernel_size: 3
+    - type: conv_transition_block
+      params:
+        output_size: 4
+    - type: linear_block
+      params:
+        in_features: 512
+        out_features: 128
+        batch_norm: True
+        dropout: 0.2
+    - type: linear_block
+      params:
+        in_features: 128
+        out_features: 10
+        batch_norm: False
+        dropout: 0.0
+trainer:
+  device: "cuda"
+  epochs: 10
+  learning_rate: 0.001

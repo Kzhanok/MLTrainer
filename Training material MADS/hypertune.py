@@ -19,6 +19,22 @@ NUM_SAMPLES = 2
 MAX_EPOCHS = 50
 import torch.nn as nn
 import torch.hub
+from torchvision import transforms
+data_transforms = {
+        'train': transforms.Compose([
+            transforms.RandomResizedCrop(224),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ]),
+        'val': transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ]),
+    }
+
 class CustomResNextModel(nn.Module):
     def __init__(self, config: Dict) -> None:
         super().__init__()
@@ -53,8 +69,10 @@ def train(config: Dict):
         streamers = gesturesdatasetfactory.create_datastreamer(
             batchsize=32, preprocessor=preprocessor
         )
-        train_streamer = streamers["train"]
-        valid_streamer = streamers["valid"]
+        train_set = gesturesdatasetfactory.create_dataset(data_dir, split="train", transform=data_transforms['train'])
+        valid_set = gesturesdatasetfactory.create_dataset(data_dir, split="valid", transform=data_transforms['val'])
+        train_streamer = train_set.streamer(batchsize=32, shuffle=True)
+        valid_streamer = valid_set.streamer(batchsize=32, shuffle=False)
 
     # Set up the metric and create the model with the config
     accuracy = metrics.Accuracy()

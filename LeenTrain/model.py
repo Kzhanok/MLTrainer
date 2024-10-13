@@ -38,7 +38,7 @@ class Model(nn.Module):
     def __init__(self, config, device="cuda"):
         super().__init__()
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
-        print(self.device)
+        
         self.to(self.device)
 
         if config is None:
@@ -46,7 +46,7 @@ class Model(nn.Module):
             return
 
         self.input_size = config['model']['input_size']
-        print(self.input_size)
+        
         self.blocks = ModelBlocks()
         self.layers = nn.ModuleList()
         self._build_model(config['model']['layers'])

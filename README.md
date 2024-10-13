@@ -19,4 +19,5 @@ Building Guide:
 Current State:
 
 Model is defined!
-Next Trainer needs to be built -> MLFLOW experiment names need to be dynamic
+Trainer is built!
+See MLtrainer -> Readme.md for full context

@@ -171,3 +171,5 @@ cython_debug/
 LICENSE.txt
 *ubyte
 *.gz
+*.lock
+*.pt

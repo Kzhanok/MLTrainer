@@ -61,3 +61,4 @@ class Accuracy(Metric):
 
     def __call__(self, y: Array, yhat: Array) -> float:
         return (yhat.argmax(axis=1) == y).sum() / len(yhat)
+

@@ -1,9 +1,9 @@
 model:
-  input_size: [1, 28, 28]
+  input_size: [3, 224, 224]
   layers:
     - type: conv2d_max_block
       params:
-        in_channels: 1
+        in_channels: 3
         out_channels: 32
         kernel_size: 3
         stride: 1
@@ -33,7 +33,7 @@ model:
     - type: linear_block
       params:
         in_features: 128
-        out_features: 10
+        out_features: 5
         batch_norm: False
         dropout: 0.0
 trainer:

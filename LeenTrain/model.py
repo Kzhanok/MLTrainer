@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from loguru import logger
 
+#TODO change model blocks to be classes each with their own forward function see mads course lesson 5 notebook2
 class ModelBlocks(nn.Module):
     def __init__(self):
         super().__init__()
@@ -22,7 +23,7 @@ class ModelBlocks(nn.Module):
             layers.append(nn.BatchNorm2d(out_channels))
         layers.append(nn.ReLU())
         if max_pool:
-            print(max_pool_kernel_size)
+            
             layers.append(nn.MaxPool2d(max_pool_kernel_size))
         return nn.Sequential(*layers)
     

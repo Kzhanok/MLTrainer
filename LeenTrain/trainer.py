@@ -69,7 +69,7 @@ class Trainer:
         #TODO add early stopping
         """
         
-        for epoch in tqdm(range(self.settings.epochs), colour="#1e4706"):
+        for epoch in tqdm(range(self.settings.epochs)):
             train_loss = self.train_batch()
             metric_dict, test_loss = self.evaluate_batch()
             self.report(epoch, train_loss, test_loss, metric_dict)
@@ -121,7 +121,7 @@ class Trainer:
         valid_steps = self.settings.valid_steps
         test_loss: float = 0.0
         metric_dict = {}
-        for i in tqdm(range(valid_steps)):
+        for i in range(valid_steps):
             x, y = next(iter(self.valid_loader))
             if self.device:
                 x, y = x.to(self.device), y.to(self.device)
